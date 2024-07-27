@@ -6,12 +6,13 @@
 
 use std::sync::OnceLock;
 
-use me3_launcher_attach_protocol::{AttachRequest, AttachResult, Attachment};
-
+use me3_launcher_attach_protocol::{AttachError, AttachRequest, AttachResult, Attachment};
+use asset::AssetLoadHook;
 use crate::host::{hook::thunk::ThunkPool, ModHost};
 
 mod detour;
 mod host;
+mod asset;
 
 static INSTANCE: OnceLock<usize> = OnceLock::new();
 /// https://learn.microsoft.com/en-us/windows/win32/dlls/dllmain#parameters
@@ -19,9 +20,18 @@ const DLL_PROCESS_ATTACH: u32 = 1;
 
 dll_syringe::payload_procedure! {
     fn me_attach(request: AttachRequest) -> AttachResult {
-        let host = ModHost::new(ThunkPool::new()?);
-        host.attach();
+        let mut host = ModHost::new(ThunkPool::new()?);
 
+        let mut asset_hook = AssetLoadHook;
+        request.packages.iter()
+            .map(|p|
+                asset_hook.scan_directory(p.source.0.as_path())
+                    .map_err(|e| AttachError(format!("Could not load package {:?}. error = {}", p.source.0, e)))
+            )
+            .collect::<Result<Vec<_>, AttachError>>()?;
+        asset_hook.attach(&mut host);
+
+        host.attach();
 
         let host = ModHost::get_attached_mut();
 

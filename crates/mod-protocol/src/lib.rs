@@ -25,6 +25,7 @@ impl Default for ModProfile {
 
 impl ModProfile {
     pub fn from_file(path: &Path) -> Result<Self, std::io::Error> {
+        dbg!(path);
         let mut file = File::open(path)?;
 
         match path.extension().and_then(|path| path.to_str()) {
