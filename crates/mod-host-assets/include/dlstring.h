@@ -87,8 +87,6 @@ void set_dlstring_contents(DLWString* string, rust::String contents) {
     std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> convert;
     std::u16string converted = convert.from_bytes(temp);
     string->inner.assign(converted.data());
-    // return rust::String(string.inner.data());
 }
-
 
 #endif

@@ -1,16 +1,16 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::{OnceLock, RwLock};
+use std::io::Write;
+use std::path::{Path, PathBuf, StripPrefixError};
 
 use thiserror::Error;
 
-// TODO: we can probably swap out the string and do minimal copy comparisons instead?
-// static ASSET_MAPPING: OnceLock<RwLock<HashMap<String, Vec<u16>>>> = OnceLock::new();
+use crate::log_file;
 
 #[derive(Debug, Default)]
 pub struct AssetMapping {
-    mapping: HashMap<String, Vec<u16>>,
+    map: HashMap<String, String>,
+    virtual_roots: HashMap<String, String>,
 }
 
 #[derive(Debug, Error)]
@@ -23,12 +23,24 @@ pub enum AssetMappingError {
 
     #[error("Could not acquire directory entry")]
     DirEntryAcquire(std::io::Error),
+
+    #[error("Could not acquire directory entry")]
+    StripPrefix(#[from] StripPrefixError),
 }
 
 impl AssetMapping {
-    ///  Traverses a folder structure adding everything it discovers as an
-    ///  asset mapping.
-    pub fn scan_directory<P: AsRef<Path>>(&mut self, base_directory: P) -> Result<(), AssetMappingError> {
+    pub fn new(virtual_roots: HashMap<String, String>) -> Self {
+        Self {
+            virtual_roots,
+            ..Default::default()
+        }
+    }
+
+    ///  Traverses a folder structure, mapping discovered assets into itself.
+    pub fn scan_directory<P: AsRef<Path>>(
+        &mut self,
+        base_directory: P,
+    ) -> Result<(), AssetMappingError> {
         let base_directory = base_directory.as_ref();
         if (!base_directory.is_dir()) {
             return Err(AssetMappingError::InvalidDirectory(
@@ -43,22 +55,15 @@ impl AssetMapping {
 
                 if !entry.path().is_dir() {
                     let asset_path = normalize_path(entry.path());
-                    let vfs_path = convert_to_vfs_path(
+                    let vfs_path = path_to_asset_lookup_key(
                         normalize_path(base_directory).as_path(),
                         asset_path.as_path(),
+                    )?;
+
+                    self.map.insert(
+                        vfs_path,
+                        asset_path.to_string_lossy().to_string(),
                     );
-
-                    self.mapping.insert(vfs_path, encode_path(asset_path));
-                    // let vfs_path = asset_path.file_name().unwrap().to_string_lossy().to_string();
-
-                    // log_file().write().unwrap()
-                    //     .write_all(format!("Discovered override asset: {:?}\n", vfs_path).as_bytes());
-
-                    // let _ = ASSET_MAPPING.get_or_init(Default::default)
-                    //     .write()
-                    //     .unwrap()
-                    //     .insert(vfs_path, encode_path(asset_path));
-                    //     .insert(vfs_path, Self::encode_path(asset_path));
                 } else {
                     paths_to_scan.push_back(entry.path());
                 }
@@ -67,6 +72,22 @@ impl AssetMapping {
 
         Ok(())
     }
+
+    pub fn get_override(&self, path: &str) -> Option<&String> {
+        let key = self.resolve_virtual_root(path);
+
+        log_file().write().unwrap()
+            .write_all(format!("Lookup key: {key}\n").as_bytes()).unwrap();
+
+        self.map.get(&key)
+    }
+
+    fn resolve_virtual_root(&self, input: &str) -> String {
+        input.split_once(":/")
+            .and_then(|r| self.virtual_roots.get(r.0).map(|a| (r.1, a)))
+            .map(|r| format!("{}{}", r.1, r.0))
+            .unwrap_or(input.to_string())
+    }
 }
 
 /// Normalizes paths to use / as a path seperator
@@ -74,45 +95,87 @@ fn normalize_path<P: AsRef<Path>>(path: P) -> PathBuf {
     PathBuf::from(path.as_ref().to_string_lossy().replace('\\', "/"))
 }
 
-/// Turns an asset path into an asset path based on the mods base path.
-/// INPUT EXAMPLE: menu/somefile.gfx, parts/someweapon.partsbnd.dcx
-/// OUTPUT EXAMPLE: menu:/somefile.gfx, parts:/someweapon.partsbnd.dcx
-fn convert_to_vfs_path<P: AsRef<Path>>(base: P, path: P) -> String {
-    // TODO: error reporting
-    let relative_path = match path.as_ref().strip_prefix(base) {
-        Ok(path) => path,
-        Err(_) => panic!("File path is not relative to the base path"),
-    };
+/// Turns an asset path into an asset lookup key using the mods base path.
+fn path_to_asset_lookup_key<P: AsRef<Path>>(base: P, path: P) -> Result<String, StripPrefixError>{
+    path.as_ref().strip_prefix(base)
+        .map(|p| {
+            // TODO: This doesn't have to be here if we get the game to resolve
+            // HACK: Account for one-off with hkxbhds
+            let path = p.to_string_lossy().to_lowercase();
 
-    let mut components = relative_path.iter()
-        .map(|comp| comp.to_string_lossy().replace('\\', "/"));
-    let first_component = components.next()
-        .expect("Relative path should have at least one component");
-
-    format!("{}/{}", first_component, components.collect::<Vec<_>>().join("/"))
+            if path.contains("-hkxbhd") {
+                path.split('/')
+                    .filter(|p| !p.contains("-hkxbhd"))
+                    .filter(|p| p.len() != 3 || p == &"map")
+                    .collect::<Vec<_>>()
+                    .join("/")
+            } else {
+                path
+            }
+        })
 }
 
-/// Encodes the input into a utf16 string with terminator into a Vec<u16>
-fn encode_path<P: AsRef<Path>>(path: P) -> Vec<u16> {
-    encode_string(
-        path.as_ref()
-        .as_os_str()
-        .to_string_lossy()
-    )
-}
+#[cfg(test)]
+mod test {
+    use std::{collections::HashMap, path::PathBuf};
 
-/// Encodes the input into a utf16 string with terminator into a Vec<u16>
-fn encode_string<S: AsRef<str>>(string: S) -> Vec<u16> {
-    let mut buffer = string.as_ref()
-        .to_lowercase()
-        .as_bytes()
-        .iter()
-        .copied()
-        .map(u16::from)
-        .collect::<Vec<_>>();
+    use crate::mapping::{path_to_asset_lookup_key, AssetMapping};
 
-    // Slap on the null terminator
-    buffer.push(0);
+    #[test]
+    fn file_request_path_virtual_root_rewrites() {
+        let mut asset_mapping = AssetMapping::new(HashMap::from([
+            (String::from("data0"), String::from("")),
+            (String::from("data1"), String::from("")),
+            (String::from("data2"), String::from("")),
+            (String::from("data3"), String::from("")),
+            (String::from("regulation"), String::from("")),
+            (String::from("event"), String::from("event/")),
+            (String::from("sfxbnd"), String::from("sfx/")),
+        ]));
 
-    buffer
+        assert_eq!(
+            asset_mapping.resolve_virtual_root("regulation:/regulation.bin"),
+            "regulation.bin"
+        );
+
+        assert_eq!(
+            asset_mapping.resolve_virtual_root("data0:/menu/02_010_equiptop.gfx"),
+            "menu/02_010_equiptop.gfx"
+        );
+
+        assert_eq!(
+            asset_mapping.resolve_virtual_root("event:/m60_41_38_00.emevd.dcx"),
+            "event/m60_41_38_00.emevd.dcx"
+        );
+    }
+
+    #[test]
+    fn asset_path_lookup_keys() {
+        const FAKE_MOD_BASE: &str = "D:/ModBase/"; 
+        let base_path = PathBuf::from(FAKE_MOD_BASE);
+
+        assert_eq!(
+            path_to_asset_lookup_key(
+                &base_path,
+                &PathBuf::from(format!("{FAKE_MOD_BASE}/parts/aet/aet007/aet007_071.tpf.dcx")),
+            ).unwrap(),
+            "parts/aet/aet007/aet007_071.tpf.dcx",
+        );
+
+        assert_eq!(
+            path_to_asset_lookup_key(
+                &base_path,
+                &PathBuf::from(format!("{FAKE_MOD_BASE}/hkxbnd/m60_42_36_00/h60_42_36_00_423601.hkx.dcx")),
+            ).unwrap(),
+            "hkxbnd/m60_42_36_00/h60_42_36_00_423601.hkx.dcx",
+        );
+
+        assert_eq!(
+            path_to_asset_lookup_key(
+                &base_path,
+                &PathBuf::from(format!("{FAKE_MOD_BASE}/regulation.bin")),
+            ).unwrap(),
+            "regulation.bin",
+        );
+    }
 }
