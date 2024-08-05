@@ -6,13 +6,12 @@ pub mod hook;
 #[cxx::bridge]
 pub mod ffi {
     unsafe extern "C++" {
-        include!("dlstring.h");
+        include!("dl_string_bridge.hpp");
 
         pub type DLWString;
 
-        pub unsafe fn get_dlstring_len(string: &DLWString) -> usize;
-        pub unsafe fn get_dlstring_contents(string: &DLWString) -> String;
-        pub unsafe fn set_dlstring_contents(string: *mut DLWString, contents: String);
+        pub fn get_dlwstring_contents(string: &DLWString) -> String;
+        pub fn set_dlwstring_contents(string: &DLWString, contents: &[u16]);
     }
 }
 
