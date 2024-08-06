@@ -46,7 +46,7 @@ fn run() -> LauncherResult<()> {
     let profiles: Vec<_> = args
         .profiles
         .iter()
-        .map(|path| { let test = ModProfile::from_file(path); info!("Parse result: {test:?}"); test})
+        .map(|path| ModProfile::from_file(path))
         .collect::<Result<_, _>>()?;
 
     let mut natives = vec![];

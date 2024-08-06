@@ -99,21 +99,10 @@ fn normalize_path<P: AsRef<Path>>(path: P) -> PathBuf {
 
 /// Turns an asset path into an asset lookup key using the mods base path.
 fn path_to_asset_lookup_key<P: AsRef<Path>>(base: P, path: P) -> Result<String, StripPrefixError>{
-    path.as_ref().strip_prefix(base)
+    path.as_ref()
+        .strip_prefix(base)
         .map(|p| {
-            // TODO: This doesn't have to be here if we get the game to resolve
-            // HACK: Account for one-off with hkxbhds
-            let path = p.to_string_lossy().to_lowercase();
-
-            if path.contains("-hkxbhd") {
-                path.split('/')
-                    .filter(|p| !p.contains("-hkxbhd"))
-                    .filter(|p| p.len() != 3 || p == &"map")
-                    .collect::<Vec<_>>()
-                    .join("/")
-            } else {
-                path
-            }
+            p.to_string_lossy().to_lowercase()
         })
 }
 
