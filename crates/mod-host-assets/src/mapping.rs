@@ -3,13 +3,15 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf, StripPrefixError};
 
+use std::os::windows::ffi::OsStrExt;
+
 use thiserror::Error;
 
 use crate::log_file;
 
 #[derive(Debug, Default)]
 pub struct AssetMapping {
-    map: HashMap<String, String>,
+    map: HashMap<String, Vec<u16>>,
     virtual_roots: HashMap<String, String>,
 }
 
@@ -62,7 +64,7 @@ impl AssetMapping {
 
                     self.map.insert(
                         vfs_path,
-                        asset_path.to_string_lossy().to_string(),
+                        asset_path.into_os_string().encode_wide().collect(),
                     );
                 } else {
                     paths_to_scan.push_back(entry.path());
@@ -73,13 +75,13 @@ impl AssetMapping {
         Ok(())
     }
 
-    pub fn get_override(&self, path: &str) -> Option<&String> {
+    pub fn get_override(&self, path: &str) -> Option<&[u16]> {
         let key = self.resolve_virtual_root(path);
 
         log_file().write().unwrap()
             .write_all(format!("Lookup key: {key}\n").as_bytes()).unwrap();
 
-        self.map.get(&key)
+        self.map.get(&key).map(|v| &v[..])
     }
 
     fn resolve_virtual_root(&self, input: &str) -> String {

@@ -4,5 +4,6 @@ fn main() {
         .compile("test");
 
     println!("cargo:rerun-if-changed=src/lib.rs");
-    println!("cargo:rerun-if-changed=include/dlstring.h");
+    println!("cargo:rerun-if-changed=include/dl_allocator.hpp");
+    println!("cargo:rerun-if-changed=include/dl_string_bridge.hpp");
 }
