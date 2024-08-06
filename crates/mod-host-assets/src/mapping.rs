@@ -1,13 +1,12 @@
-use std::collections::{HashMap, VecDeque};
-use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf, StripPrefixError};
-
-use std::os::windows::ffi::OsStrExt;
+use std::{
+    collections::{HashMap, VecDeque},
+    fs,
+    io::Write,
+    os::windows::ffi::OsStrExt,
+    path::{Path, PathBuf, StripPrefixError},
+};
 
 use thiserror::Error;
-
-use crate::log_file;
 
 #[derive(Debug, Default)]
 pub struct AssetMapping {
@@ -46,7 +45,7 @@ impl AssetMapping {
         let base_directory = base_directory.as_ref();
         if (!base_directory.is_dir()) {
             return Err(AssetMappingError::InvalidDirectory(
-                base_directory.to_path_buf()
+                base_directory.to_path_buf(),
             ));
         }
 
@@ -78,14 +77,12 @@ impl AssetMapping {
     pub fn get_override(&self, path: &str) -> Option<&[u16]> {
         let key = self.resolve_virtual_root(path);
 
-        log_file().write().unwrap()
-            .write_all(format!("Lookup key: {key}\n").as_bytes()).unwrap();
-
         self.map.get(&key).map(|v| &v[..])
     }
 
     fn resolve_virtual_root(&self, input: &str) -> String {
-        input.split_once(":/")
+        input
+            .split_once(":/")
             .and_then(|r| self.virtual_roots.get(r.0).map(|a| (r.1, a)))
             .map(|r| format!("{}{}", r.1, r.0))
             .unwrap_or(input.to_string())
@@ -98,30 +95,27 @@ fn normalize_path<P: AsRef<Path>>(path: P) -> PathBuf {
 }
 
 /// Turns an asset path into an asset lookup key using the mods base path.
-fn path_to_asset_lookup_key<P: AsRef<Path>>(base: P, path: P) -> Result<String, StripPrefixError>{
+fn path_to_asset_lookup_key<P: AsRef<Path>>(base: P, path: P) -> Result<String, StripPrefixError> {
     path.as_ref()
         .strip_prefix(base)
-        .map(|p| {
-            p.to_string_lossy().to_lowercase()
-        })
+        .map(|p| p.to_string_lossy().to_lowercase())
 }
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashMap, path::PathBuf};
+    use std::{
+        collections::HashMap,
+        path::{Path, PathBuf},
+    };
 
     use crate::mapping::{path_to_asset_lookup_key, AssetMapping};
 
     #[test]
     fn file_request_path_virtual_root_rewrites() {
-        let mut asset_mapping = AssetMapping::new(HashMap::from([
+        let asset_mapping = AssetMapping::new(HashMap::from([
             (String::from("data0"), String::from("")),
-            (String::from("data1"), String::from("")),
-            (String::from("data2"), String::from("")),
-            (String::from("data3"), String::from("")),
             (String::from("regulation"), String::from("")),
             (String::from("event"), String::from("event/")),
-            (String::from("sfxbnd"), String::from("sfx/")),
         ]));
 
         assert_eq!(
@@ -142,22 +136,28 @@ mod test {
 
     #[test]
     fn asset_path_lookup_keys() {
-        const FAKE_MOD_BASE: &str = "D:/ModBase/"; 
+        const FAKE_MOD_BASE: &str = "D:/ModBase/";
         let base_path = PathBuf::from(FAKE_MOD_BASE);
 
         assert_eq!(
             path_to_asset_lookup_key(
                 &base_path,
-                &PathBuf::from(format!("{FAKE_MOD_BASE}/parts/aet/aet007/aet007_071.tpf.dcx")),
-            ).unwrap(),
+                &PathBuf::from(format!(
+                    "{FAKE_MOD_BASE}/parts/aet/aet007/aet007_071.tpf.dcx"
+                )),
+            )
+            .unwrap(),
             "parts/aet/aet007/aet007_071.tpf.dcx",
         );
 
         assert_eq!(
             path_to_asset_lookup_key(
                 &base_path,
-                &PathBuf::from(format!("{FAKE_MOD_BASE}/hkxbnd/m60_42_36_00/h60_42_36_00_423601.hkx.dcx")),
-            ).unwrap(),
+                &PathBuf::from(format!(
+                    "{FAKE_MOD_BASE}/hkxbnd/m60_42_36_00/h60_42_36_00_423601.hkx.dcx"
+                )),
+            )
+            .unwrap(),
             "hkxbnd/m60_42_36_00/h60_42_36_00_423601.hkx.dcx",
         );
 
@@ -165,8 +165,39 @@ mod test {
             path_to_asset_lookup_key(
                 &base_path,
                 &PathBuf::from(format!("{FAKE_MOD_BASE}/regulation.bin")),
-            ).unwrap(),
+            )
+            .unwrap(),
             "regulation.bin",
+        );
+    }
+
+    #[test]
+    fn scan_directory_and_overrides() {
+        let mut asset_mapping = AssetMapping::new(HashMap::from([
+            (String::from("regulation"), String::from("")),
+            (String::from("event"), String::from("event/")),
+        ]));
+
+        let test_mod_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-data/test-mod");
+        asset_mapping.scan_directory(test_mod_dir).unwrap();
+
+        assert!(
+            asset_mapping
+                .get_override("regulation:/regulation.bin")
+                .is_some(),
+            "override for regulation.bin was not found"
+        );
+        assert!(
+            asset_mapping
+                .get_override("event:/common.emevd.dcx")
+                .is_some(),
+            "override for event/common.emevd.dcx not found"
+        );
+        assert!(
+            asset_mapping
+                .get_override("regulation:/common.emevd.dcx")
+                .is_none(),
+            "event/common.emevd.dcx was found incorrectly under the regulation root"
         );
     }
 }

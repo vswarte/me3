@@ -14,11 +14,3 @@ pub mod ffi {
         pub fn set_dlwstring_contents(string: &DLWString, contents: &[u16]);
     }
 }
-
-static LOG_HANDLE: OnceLock<RwLock<File>> = OnceLock::new();
-
-pub fn log_file() -> &'static RwLock<File> {
-    LOG_HANDLE.get_or_init(|| {
-        RwLock::new(std::fs::File::create("file_hook.log").unwrap())
-    })
-}
